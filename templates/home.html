@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+    {% if posts %}
+        {% for e in posts %}
+            <br>
+            <article>
+            <h2>{{e.subject}}</h2>
+            <p>{{e.content}}</p>
+            </article>
+        {% endfor %}
+    {% endif %}
+{% endblock %}

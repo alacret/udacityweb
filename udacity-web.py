@@ -1,21 +1,51 @@
 import os
 import webapp2
-
+from google.appengine.ext import db
 import jinja2
 
-jinja_environment = jinja2.Environment(autoescape=True,
+jinja = jinja2.Environment(autoescape=True,
     loader=jinja2.FileSystemLoader(os.path.join(os.path.dirname(__file__), 'templates')))
 
-class MainPage(webapp2.RequestHandler):
-    def get(self):
-        self.response.out.write("")
+def jinja_render(template, **params):
+    t = jinja.get_template(template)
+    return t.render(params)
 
-class FizzBuzz(webapp2.RequestHandler):
-    def get(self):
-        self.write_form()
+class Post(db.Model):
+    subject = db.StringProperty(required =True)
+    content = db.TextProperty(required =True)
+    created = db.DateTimeProperty(auto_now_add=True)
 
+class PostsHandler(webapp2.RequestHandler):
+    def get(self):
+        posts = db.GqlQuery("select * from Post order by created desc")
+        self.response.out.write(jinja_render("home.html",posts=posts))
+
+class NewPostHandler(webapp2.RequestHandler):
+    def get(self):
+        self.response.out.write(jinja_render("newpost.html"))
+    def post(self):
+        subject = self.request.get("subject")
+        content = self.request.get("content")
+
+        if subject and content:
+            p = Post(subject = subject, content = content)
+            p.put()
+            id = p.key().id()
+            self.redirect("/post/" + str(id))
+        else:
+            self.response.out.write(jinja_render("newpost.html",subject=subject,content=content))
+
+class PostHandler(webapp2.RequestHandler):
+    def get(self,id):
+        post = Post.get_by_id(long(id))
+
+        if not post:
+            self.redirect("/")
+
+        self.response.out.write(jinja_render("post.html",post=post))
 
 application = webapp2.WSGIApplication([
-	('/', MainPage),
-    ('/fizzbuzz', FizzBuzz),
+	('/', PostsHandler),
+    ('/newpost', NewPostHandler),
+    (r'/post/(\d+)', PostHandler),
 ], debug=True)
