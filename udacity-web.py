@@ -1,4 +1,4 @@
-import os,json,jsonU, webapp2, re, jinja2, hashlib
+import os,json,jsonU, webapp2, re, jinja2, hashlib, time
 from google.appengine.ext import db
 
 jinja = jinja2.Environment(autoescape=True,
@@ -88,10 +88,32 @@ class Post(db.Model):
     content = db.TextProperty(required =True)
     created = db.DateTimeProperty(auto_now_add=True)
 
+CACHE = {}
+TIMES = {}
+home_cache_key = "home"
+time_when_query = time.time()
+
+def get_post(id):
+    if not str(id) in CACHE:
+        CACHE[str(id)] = Post.get_by_id(long(id))
+        TIMES[str(id)] = time.time()
+    return CACHE[str(id)]
+
+def get_posts(update=False):
+    if not home_cache_key in CACHE or update:
+        print "making query"
+        posts = db.GqlQuery("select * from Post order by created desc")
+        CACHE[home_cache_key] = list(posts)
+        global time_when_query
+        time_when_query = time.time()
+    return CACHE[home_cache_key]
+
 class PostsHandler(webapp2.RequestHandler):
     def get(self):
-        posts = db.GqlQuery("select * from Post order by created desc")
-        self.response.out.write(jinja_render("home.html",posts=posts))
+        posts = get_posts()
+        time_since = int(time.time() - time_when_query)
+        print time_since
+        self.response.out.write(jinja_render("home.html",posts=posts, time=time_since))
 
 class JSONPostsHandler(webapp2.RequestHandler):
     def get(self):
@@ -112,18 +134,19 @@ class NewPostHandler(webapp2.RequestHandler):
             p = Post(subject = subject, content = content)
             p.put()
             id = p.key().id()
+            get_posts(update = True)
             self.redirect("/post/" + str(id))
         else:
             self.response.out.write(jinja_render("newpost.html",subject=subject,content=content))
 
 class PostHandler(webapp2.RequestHandler):
     def get(self,id):
-        post = Post.get_by_id(long(id))
-
+        post = get_post(long(id))
+        time_since = int(time.time() - TIMES[str(id)])
         if not post:
             self.redirect("/")
 
-        self.response.out.write(jinja_render("post.html",post=post))
+        self.response.out.write(jinja_render("post.html",post=post,time=time_since))
 
 class JSONPostHandler(webapp2.RequestHandler):
     def get(self,id):
@@ -219,8 +242,14 @@ class LogoutPage(webapp2.RequestHandler):
         self.response.delete_cookie("username", path='/')
         self.redirect("/signup")
 
+class FlushPage(webapp2.RequestHandler):
+    def get(self):
+        CACHE.clear()
+        self.redirect("/")
+
 application = webapp2.WSGIApplication([
 	('/', PostsHandler),
+    ('/blog', PostsHandler),
     ('/.json', JSONPostsHandler),
     ('/newpost', NewPostHandler),
     (r'/post/(\d+)', PostHandler),
@@ -229,4 +258,5 @@ application = webapp2.WSGIApplication([
     ('/welcome', WelcomePage),
     ('/login', LoginPage),
     ('/logout', LogoutPage),
+    ('/flush', FlushPage),
 ], debug=True)
