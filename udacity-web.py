@@ -1,4 +1,4 @@
-import os
+import os,json,jsonU
 import webapp2
 from google.appengine.ext import db
 import jinja2
@@ -19,6 +19,14 @@ class PostsHandler(webapp2.RequestHandler):
     def get(self):
         posts = db.GqlQuery("select * from Post order by created desc")
         self.response.out.write(jinja_render("home.html",posts=posts))
+
+class JSONPostsHandler(webapp2.RequestHandler):
+    def get(self):
+        posts = db.GqlQuery("select * from Post order by created desc")
+        posts = list(posts)
+        self.response.headers["Content-type"]="application/json"
+        self.response.out.write(jsonU.encode(posts))
+
 
 class NewPostHandler(webapp2.RequestHandler):
     def get(self):
@@ -44,8 +52,19 @@ class PostHandler(webapp2.RequestHandler):
 
         self.response.out.write(jinja_render("post.html",post=post))
 
+class JSONPostHandler(webapp2.RequestHandler):
+    def get(self,id):
+        post = Post.get_by_id(long(id))
+
+        if not post:
+            self.redirect("/")
+        self.response.headers["Content-type"]="application/json"
+        self.response.out.write(jsonU.encode(post))
+
 application = webapp2.WSGIApplication([
 	('/', PostsHandler),
+    ('/.json', JSONPostsHandler),
     ('/newpost', NewPostHandler),
     (r'/post/(\d+)', PostHandler),
+    (r'/post/(\d+).json', JSONPostHandler),
 ], debug=True)
