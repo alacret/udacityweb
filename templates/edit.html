@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<form method="post">
+<input type="hidden" name="page_key" value="{{page_key}}">
+<textarea name="html">
+{{html}}
+</textarea>
+<input type="submit">
+</form>
+{% endblock %}

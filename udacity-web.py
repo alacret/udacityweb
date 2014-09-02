@@ -1,4 +1,4 @@
-import os,json,jsonU, webapp2, re, jinja2, hashlib, time
+import os,json,jsonU, webapp2, re, jinja2, hashlib, time, logging as LOG
 from google.appengine.ext import db
 
 jinja = jinja2.Environment(autoescape=True,
@@ -79,83 +79,25 @@ def jinja_render(template, **params):
     t = jinja.get_template(template)
     return t.render(params)
 
+def is_session(request):
+    username_cookie = request.cookies.get("username")
+    if not username_cookie:
+        return False
+    else:
+        t = username_cookie.split("|")
+        if len(t) > 1:
+            hash = hashlib.md5(t[0]).hexdigest()
+            if hash == t[1]:
+                return t[0]
+
 class User(db.Model):
     username = db.StringProperty()
     password = db.StringProperty()
 
-class Post(db.Model):
-    subject = db.StringProperty(required =True)
-    content = db.TextProperty(required =True)
-    created = db.DateTimeProperty(auto_now_add=True)
+class Page(db.Model):
+    name = db.StringProperty()
+    html = db.TextProperty()
 
-CACHE = {}
-TIMES = {}
-home_cache_key = "home"
-time_when_query = time.time()
-
-def get_post(id):
-    if not str(id) in CACHE:
-        CACHE[str(id)] = Post.get_by_id(long(id))
-        TIMES[str(id)] = time.time()
-    return CACHE[str(id)]
-
-def get_posts(update=False):
-    if not home_cache_key in CACHE or update:
-        print "making query"
-        posts = db.GqlQuery("select * from Post order by created desc")
-        CACHE[home_cache_key] = list(posts)
-        global time_when_query
-        time_when_query = time.time()
-    return CACHE[home_cache_key]
-
-class PostsHandler(webapp2.RequestHandler):
-    def get(self):
-        posts = get_posts()
-        time_since = int(time.time() - time_when_query)
-        print time_since
-        self.response.out.write(jinja_render("home.html",posts=posts, time=time_since))
-
-class JSONPostsHandler(webapp2.RequestHandler):
-    def get(self):
-        posts = db.GqlQuery("select * from Post order by created desc")
-        posts = list(posts)
-        self.response.headers["Content-type"]="application/json"
-        self.response.out.write(jsonU.encode(posts))
-
-
-class NewPostHandler(webapp2.RequestHandler):
-    def get(self):
-        self.response.out.write(jinja_render("newpost.html"))
-    def post(self):
-        subject = self.request.get("subject")
-        content = self.request.get("content")
-
-        if subject and content:
-            p = Post(subject = subject, content = content)
-            p.put()
-            id = p.key().id()
-            get_posts(update = True)
-            self.redirect("/post/" + str(id))
-        else:
-            self.response.out.write(jinja_render("newpost.html",subject=subject,content=content))
-
-class PostHandler(webapp2.RequestHandler):
-    def get(self,id):
-        post = get_post(long(id))
-        time_since = int(time.time() - TIMES[str(id)])
-        if not post:
-            self.redirect("/")
-
-        self.response.out.write(jinja_render("post.html",post=post,time=time_since))
-
-class JSONPostHandler(webapp2.RequestHandler):
-    def get(self,id):
-        post = Post.get_by_id(long(id))
-
-        if not post:
-            self.redirect("/")
-        self.response.headers["Content-type"]="application/json"
-        self.response.out.write(jsonU.encode(post))
 
 class SignUpPage(webapp2.RequestHandler):
     def write_form(self,username="",username_error="",password_error="",email="",email_error=""):
@@ -205,23 +147,6 @@ class SignUpPage(webapp2.RequestHandler):
         else:
             self.write_form(username, username_error, password_error, email, email_error)
 
-class WelcomePage(webapp2.RequestHandler):
-    def get(self):
-        username_cookie = self.request.cookies.get("username")
-        if not username_cookie:
-            self.redirect("/signup")
-        else:
-            t = username_cookie.split("|")
-            print username_cookie
-            if len(t) > 1:
-                hash = hashlib.md5(t[0]).hexdigest()
-                if hash == t[1]:
-                    self.response.out.write(jinja_render("thanks.html",username = t[0]))
-                else:
-                    self.redirect("/signup")
-            else:
-                self.redirect("/signup")
-
 class LoginPage(webapp2.RequestHandler):
     def get(self):
         self.response.out.write(jinja_render("login.html"))
@@ -233,7 +158,7 @@ class LoginPage(webapp2.RequestHandler):
             digest = hashlib.md5(username).hexdigest()
             cookie = str('username='+username+'|'+digest+'; Path=/')
             self.response.headers.add_header('Set-Cookie', cookie)
-            self.redirect("/welcome")
+            self.redirect("/")
         else:
             self.response.out.write(jinja_render("login.html",error="Invalid login"))
 
@@ -242,21 +167,54 @@ class LogoutPage(webapp2.RequestHandler):
         self.response.delete_cookie("username", path='/')
         self.redirect("/signup")
 
-class FlushPage(webapp2.RequestHandler):
-    def get(self):
-        CACHE.clear()
-        self.redirect("/")
+class WikiPage(webapp2.RequestHandler):
+    def get(self,page_name):
+        a = Page.all().filter("name =", page_name)
+        print "Page:" + page_name
+        if a.count() == 0:
+            if is_session(self.request):
+                self.redirect("/_edit"+page_name)
+            else:
+                self.redirect("/signup")
+        else:
+            self.response.out.write(jinja_render("view.html",html=a[0].html, username=is_session(self.request),page_name = page_name))
+
+class EditPage(webapp2.RequestHandler):
+    def get(self,page_name):
+        if not is_session(self.request):
+            self.redirect("/signup")
+            return
+
+        p = Page.all().filter("name =", page_name)
+
+        if p.count() == 0:
+            p = Page(name=page_name,html="")
+            p.put()
+            time.sleep(1)
+        else:
+            p = p[0]
+
+        self.response.out.write(jinja_render("edit.html",html=p.html, page_name = page_name))
+    def post(self,page_name):
+        if not is_session(self.request):
+            self.redirect("/signup")
+            return
+
+        html = self.request.get('html')
+        p = Page.all().filter("name =",page_name).get()
+        if p is None:
+            p = Page(name = page_name)
+        p.html = html
+        p.put()
+        time.sleep(1)
+        self.redirect(page_name)
+
+PAGE_RE = r'(/(?:[a-zA-Z0-9_-]+/?)*)'
 
 application = webapp2.WSGIApplication([
-	('/', PostsHandler),
-    ('/blog', PostsHandler),
-    ('/.json', JSONPostsHandler),
-    ('/newpost', NewPostHandler),
-    (r'/post/(\d+)', PostHandler),
-    (r'/post/(\d+).json', JSONPostHandler),
     ('/signup', SignUpPage),
-    ('/welcome', WelcomePage),
     ('/login', LoginPage),
     ('/logout', LogoutPage),
-    ('/flush', FlushPage),
+    ('/_edit' + PAGE_RE, EditPage),
+    (PAGE_RE, WikiPage),
 ], debug=True)
