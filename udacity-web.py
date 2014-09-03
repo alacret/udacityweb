@@ -182,7 +182,7 @@ class WikiPage(webapp2.RequestHandler):
 class EditPage(webapp2.RequestHandler):
     def get(self,page_name):
         if not is_session(self.request):
-            self.redirect("/signup")
+            self.redirect("/login")
             return
 
         p = Page.all().filter("name =", page_name)
@@ -197,7 +197,7 @@ class EditPage(webapp2.RequestHandler):
         self.response.out.write(jinja_render("edit.html",html=p.html, page_name = page_name))
     def post(self,page_name):
         if not is_session(self.request):
-            self.redirect("/signup")
+            self.redirect("/login")
             return
 
         html = self.request.get('html')
